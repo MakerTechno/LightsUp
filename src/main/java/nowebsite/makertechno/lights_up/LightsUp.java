@@ -3,6 +3,7 @@ package nowebsite.makertechno.lights_up;
 import com.mojang.logging.LogUtils;
 import net.neoforged.bus.api.IEventBus;
 import net.neoforged.fml.common.Mod;
+import nowebsite.makertechno.lights_up.client.render.SpotlightPipelines;
 import nowebsite.makertechno.lights_up.common.init.LUBlockReg;
 import nowebsite.makertechno.lights_up.common.init.LUCreativeTabs;
 import nowebsite.makertechno.lights_up.common.init.LUItemReg;
@@ -21,6 +22,7 @@ public class LightsUp {
         LUBlockReg.BLOCKS.register(modEventBus);
         LUItemReg.ITEMS.register(modEventBus);
         LUBlockReg.BLOCK_ENTITY_TYPES.register(modEventBus);
+        modEventBus.addListener(SpotlightPipelines::register);
         LUCreativeTabs.TABS.register(modEventBus);
         modEventBus.addListener(LUCreativeTabs::registerCreativeTabs);
     }

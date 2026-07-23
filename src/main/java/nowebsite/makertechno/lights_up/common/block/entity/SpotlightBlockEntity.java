@@ -41,6 +41,6 @@ public class SpotlightBlockEntity extends BlockEntity {
     }
 
     public void setConeAngle(float angle) {
-        this.coneAngle = Math.max(5.0f, Math.min(60.0f, angle));
+        this.coneAngle = Math.clamp(angle, 5.0f, 60.0f);
     }
 }

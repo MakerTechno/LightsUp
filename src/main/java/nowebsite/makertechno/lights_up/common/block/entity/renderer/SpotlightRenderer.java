@@ -3,6 +3,7 @@ package nowebsite.makertechno.lights_up.common.block.entity.renderer;
 import com.mojang.blaze3d.vertex.PoseStack;
 import com.mojang.blaze3d.vertex.VertexConsumer;
 import com.mojang.math.Axis;
+import dev.anvilcraft.lib.v2.rendering.ALRPostEffects;
 import net.minecraft.client.renderer.*;
 import net.minecraft.client.renderer.blockentity.BlockEntityRenderer;
 import net.minecraft.client.renderer.blockentity.BlockEntityRendererProvider;
@@ -58,27 +59,62 @@ public class SpotlightRenderer implements BlockEntityRenderer<@NotNull Spotlight
     public void submit(SpotlightRenderState state, PoseStack poseStack, SubmitNodeCollector submitNodeCollector, CameraRenderState camera) {
         
         poseStack.pushPose();
+        poseStack.translate(0.5,0.5,0.5);
         applyFacingRotation(poseStack, state.facing);
-        
+        PoseStack.Pose pose = poseStack.last().copy();
         // 使用新的 RenderType
         submitNodeCollector.submitCustomGeometry(
             poseStack,
-            SpotlightShaderManager.SPOTLIGHT_BEAM,
-            (pose, consumer) -> renderBeamGeometry(pose, consumer, state)
+            SpotlightShaderManager.getBeamRenderType(),
+            (pose1, consumer) -> renderBeamGeometry(pose, consumer, state, false)
         );
-        
+        ALRPostEffects.getBloomPostEffect().drawBloomed((submitNodeCollector1, poseStack1)->{
+            applyFacingRotation(poseStack1, state.facing);
+            submitNodeCollector1.submitCustomGeometry(
+                    poseStack,
+                    SpotlightShaderManager.getBeamRenderType(),
+                    (pose1, consumer1) -> renderBeamGeometry(pose, consumer1, state, true)
+            );
+        });
         poseStack.popPose();
     }
 
-    private void renderBeamGeometry(PoseStack.Pose pose, VertexConsumer consumer, SpotlightRenderState state) {
+    private void renderBeamGeometry(PoseStack.Pose pose, VertexConsumer consumer, SpotlightRenderState state, boolean outOnly) {
         Matrix4f matrix = pose.pose();
         
         float beamLength = state.beamLength;
-        float endRadius = (float) (beamLength * Math.tan(Math.toRadians(state.coneAngle)));
-        int color = state.packedColor;
+        float baseRadius = (float) (beamLength * Math.tan(Math.toRadians(state.coneAngle)));
+
+        int baseColor = state.packedColor;
+        int outerColor = scaleAlpha(baseColor, 0.1f);
+
         int segments = 32;
-        
-        // 绘制锥体侧面
+        if(outOnly){
+            drawCone(consumer, matrix, beamLength, baseRadius * 1.05f, baseColor, segments,true);
+            drawCone(consumer, matrix, beamLength, baseRadius, baseColor, segments,false);
+            drawCone(consumer, matrix, beamLength, baseRadius * 0.95f, baseColor, segments,true);
+        }else {
+            for (int step = 0; step < 22; step++) {
+                float scale;
+                int color;
+                if (step < 4) {
+                    scale = 1.0f + step * 0.05f;
+                    color = outerColor;
+                } else {
+                    scale = 1.0f - (step - 4) * 0.05f;
+                    color = scaleAlpha(baseColor, scale);
+                }
+                drawCone(consumer, matrix, beamLength, baseRadius * scale, color, segments - step, true);
+            }
+        }
+
+    }
+
+    private void drawCone(VertexConsumer consumer, Matrix4f matrix,
+                          float length, float endRadius, int apexColor, int segments, boolean flipNormal) {
+
+        int fadeColor = apexColor & 0x00FFFFFF;
+
         for (int i = 0; i < segments; i++) {
             float angle1 = (float) (2 * Math.PI * i / segments);
             float angle2 = (float) (2 * Math.PI * (i + 1) / segments);
@@ -87,25 +123,33 @@ public class SpotlightRenderer implements BlockEntityRenderer<@NotNull Spotlight
             float z1 = (float) (endRadius * Math.sin(angle1));
             float x2 = (float) (endRadius * Math.cos(angle2));
             float z2 = (float) (endRadius * Math.sin(angle2));
+            if(flipNormal){
+                addVertex(consumer, matrix, 0,0,0, apexColor);
+                addVertex(consumer, matrix, x2, length, z2, fadeColor);
+                addVertex(consumer, matrix, x1, length, z1, fadeColor);
+            }else {
+                addVertex(consumer, matrix, 0,0,0, apexColor);
+                addVertex(consumer, matrix, x1, length, z1, fadeColor);
+                addVertex(consumer, matrix, x2, length, z2, fadeColor);
+            }
+
+        }
             
-            addVertex(consumer, matrix, 0, 0, 0, color);
-            addVertex(consumer, matrix, x1, beamLength, z1, color);
-            addVertex(consumer, matrix, x2, beamLength, z2, color);
-            
-            addVertex(consumer, matrix, 0, 0, 0, color);
-            addVertex(consumer, matrix, x2, beamLength, z2, color);
-            addVertex(consumer, matrix, x1, beamLength, z1, color);
+        drawEndCap(consumer, matrix, length, endRadius, fadeColor, segments);
         }
         
-        drawEndCap(consumer, matrix, beamLength, endRadius, color, segments);
+    private static int scaleAlpha(int argb, float factor) {
+        int a = (int) (((argb >>> 24) & 0xFF) * factor);
+        int r = ((argb >>> 16) & 0xFF);
+        int g = ((argb >>>  8) & 0xFF);
+        int b = ( argb         & 0xFF);
+        return (a << 24) | (r << 16) | (g << 8) | b;
     }
 
     private void addVertex(VertexConsumer consumer, Matrix4f matrix, 
                            float x, float y, float z, int color) {
         consumer.addVertex(matrix, x, y, z)
-               .setColor(color)
-               .setUv(0, 0)
-               .setLight(0xF000F0);
+               .setColor(color);
     }
 
     private void drawEndCap(VertexConsumer consumer, Matrix4f matrix, 
