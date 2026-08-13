@@ -3,30 +3,38 @@ package nowebsite.makertechno.lights_up.common.block.entity.renderer;
 import com.mojang.blaze3d.vertex.PoseStack;
 import com.mojang.blaze3d.vertex.VertexConsumer;
 import com.mojang.math.Axis;
-import dev.anvilcraft.lib.v2.rendering.ALRPostEffects;
+//import dev.anvilcraft.lib.v2.rendering.ALRPostEffects;
 import net.minecraft.client.renderer.*;
 import net.minecraft.client.renderer.blockentity.BlockEntityRenderer;
 import net.minecraft.client.renderer.blockentity.BlockEntityRendererProvider;
 import net.minecraft.client.renderer.feature.ModelFeatureRenderer;
 import net.minecraft.client.renderer.state.level.CameraRenderState;
 import net.minecraft.core.Direction;
+import net.minecraft.util.Mth;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
+import nowebsite.makertechno.lights_up.client.glare.SpotlightGlareTracker;
 import nowebsite.makertechno.lights_up.client.render.SpotlightShaderManager;
 import nowebsite.makertechno.lights_up.common.block.SpotlightBlock;
 import nowebsite.makertechno.lights_up.common.block.entity.SpotlightBlockEntity;
 import nowebsite.makertechno.lights_up.common.block.entity.state.SpotlightRenderState;
 import org.joml.Matrix4f;
+import org.joml.Vector3f;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 public class SpotlightRenderer implements BlockEntityRenderer<@NotNull SpotlightBlockEntity, @NotNull SpotlightRenderState> {
 
+    private static final int CIRCLE_SEGMENTS = 32;
+    private static final int CONE_SECTIONS = 16;
+    //private static final float BLOOM_CORE_RATIO = 0.7f;
+    //private static final float BLOOM_INTENSITY = 1.6f;
+
     public SpotlightRenderer(BlockEntityRendererProvider.Context context) {
     }
 
     @Override
-    public @NotNull SpotlightRenderState createRenderState() {
+    public SpotlightRenderState createRenderState() {
         return new SpotlightRenderState();
     }
 
@@ -34,7 +42,7 @@ public class SpotlightRenderer implements BlockEntityRenderer<@NotNull Spotlight
     public void extractRenderState(SpotlightBlockEntity blockEntity, SpotlightRenderState state, float partialTicks, Vec3 cameraPosition,
                                    @Nullable ModelFeatureRenderer.CrumblingOverlay breakProgress) {
         BlockEntityRenderer.super.extractRenderState(blockEntity, state, partialTicks, cameraPosition, breakProgress);
-        
+
         state.red = blockEntity.getRed();
         state.green = blockEntity.getGreen();
         state.blue = blockEntity.getBlue();
@@ -42,11 +50,11 @@ public class SpotlightRenderer implements BlockEntityRenderer<@NotNull Spotlight
         state.pitch = blockEntity.getPitch();
         state.yaw = blockEntity.getYaw();
         state.coneAngle = blockEntity.getConeAngle();
-        
+
         if (blockEntity.getBlockState().getBlock() instanceof SpotlightBlock) {
             state.facing = blockEntity.getBlockState().getValue(SpotlightBlock.FACING);
         }
-        
+
         float alpha = 0.6f * state.intensity;
         int ir = (int) (Math.min(1.0f, state.red) * 255);
         int ig = (int) (Math.min(1.0f, state.green) * 255);
@@ -57,116 +65,154 @@ public class SpotlightRenderer implements BlockEntityRenderer<@NotNull Spotlight
 
     @Override
     public void submit(SpotlightRenderState state, PoseStack poseStack, SubmitNodeCollector submitNodeCollector, CameraRenderState camera) {
-        
-        poseStack.pushPose();
-        poseStack.translate(0.5,0.5,0.5);
-        applyFacingRotation(poseStack, state.facing);
-        PoseStack.Pose pose = poseStack.last().copy();
-        // 使用新的 RenderType
-        submitNodeCollector.submitCustomGeometry(
-            poseStack,
-            SpotlightShaderManager.getBeamRenderType(),
-            (pose1, consumer) -> renderBeamGeometry(pose, consumer, state, false)
-        );
-        ALRPostEffects.getBloomPostEffect().drawBloomed((submitNodeCollector1, poseStack1)->{
-            applyFacingRotation(poseStack1, state.facing);
-            submitNodeCollector1.submitCustomGeometry(
-                    poseStack,
-                    SpotlightShaderManager.getBeamRenderType(),
-                    (pose1, consumer1) -> renderBeamGeometry(pose, consumer1, state, true)
-            );
-        });
-        poseStack.popPose();
-    }
 
-    private void renderBeamGeometry(PoseStack.Pose pose, VertexConsumer consumer, SpotlightRenderState state, boolean outOnly) {
-        Matrix4f matrix = pose.pose();
-        
         float beamLength = state.beamLength;
         float baseRadius = (float) (beamLength * Math.tan(Math.toRadians(state.coneAngle)));
+        int color = state.packedColor;
 
-        int baseColor = state.packedColor;
-        int outerColor = scaleAlpha(baseColor, 0.1f);
+        poseStack.pushPose();
+        poseStack.translate(0.5, 0.5, 0.5);
+        applyFacingRotation(poseStack, state.facing);
 
-        int segments = 32;
-        if(outOnly){
-            drawCone(consumer, matrix, beamLength, baseRadius * 1.05f, baseColor, segments,true);
-            drawCone(consumer, matrix, beamLength, baseRadius, baseColor, segments,false);
-            drawCone(consumer, matrix, beamLength, baseRadius * 0.95f, baseColor, segments,true);
-        }else {
-            for (int step = 0; step < 22; step++) {
-                float scale;
-                int color;
-                if (step < 4) {
-                    scale = 1.0f + step * 0.05f;
-                    color = outerColor;
-                } else {
-                    scale = 1.0f - (step - 4) * 0.05f;
-                    color = scaleAlpha(baseColor, scale);
-                }
-                drawCone(consumer, matrix, beamLength, baseRadius * scale, color, segments - step, true);
+        Matrix4f beamMatrix = new Matrix4f(poseStack.last().pose());
+
+        SpotlightGlareTracker.submit(
+                beamMatrix.getTranslation(new Vector3f()),
+                beamMatrix.transformDirection(new Vector3f(0.0f, 1.0f, 0.0f)).normalize(),
+                state.coneAngle,
+                beamLength,
+                state.red, state.green, state.blue, state.intensity
+        );
+
+        submitNodeCollector.submitCustomGeometry(
+                poseStack,
+                SpotlightShaderManager.getBeamRenderType(),
+                (pose, consumer) -> renderCone(pose.pose(), consumer, beamLength, baseRadius, color, 1.6f)
+                );
+
+        poseStack.popPose();
+
+        /*ALRPostEffects.getBloomPostEffect().drawBloomed((bloomCollector, bloomPoseStack) -> {
+            bloomPoseStack.pushPose();
+            bloomPoseStack.mulPose(beamMatrix);
+            bloomCollector.submitCustomGeometry(
+                    bloomPoseStack,
+                    SpotlightShaderManager.getBeamRenderType(),
+                    (pose, consumer) -> {
+                        renderCone(pose.pose(), consumer, beamLength,baseRadius * BLOOM_CORE_RATIO, color, BLOOM_INTENSITY)
+                    }
+            );
+            bloomPoseStack.popPose();
+        });*///Not needed anymore ??aw
+    }
+
+    private void renderCone(Matrix4f matrix, VertexConsumer consumer,
+                            float beamLength, float radius, int baseColor, float intensityScale) {
+
+        float halfAngle = (float) Math.atan2(radius, beamLength);
+        float normalY = -(float) Math.sin(halfAngle);
+        float normalXZ = (float) Math.cos(halfAngle);
+
+        float[][] circle = new float[CIRCLE_SEGMENTS][2];
+        Vector3f[] viewNormals = new Vector3f[CIRCLE_SEGMENTS];
+
+        for (int i = 0; i < CIRCLE_SEGMENTS; i++) {
+            float angle = (float) (2 * Math.PI * i / CIRCLE_SEGMENTS);
+            float x = (float) Math.cos(angle);
+            float z = (float) Math.sin(angle);
+
+            circle[i][0] = x;
+            circle[i][1] = z;
+
+            viewNormals[i] = new Vector3f(x * normalXZ, normalY, z * normalXZ)
+                    .normalize()
+                    .mulDirection(matrix)
+                    .normalize();
+        }
+
+        int[][] ringColors = new int[CONE_SECTIONS + 1][CIRCLE_SEGMENTS];
+        for (int section = 0; section <= CONE_SECTIONS; section++) {
+            float t = (float) section / CONE_SECTIONS;
+            float y = beamLength * t;
+            float r = radius * t;
+
+            for (int i = 0; i < CIRCLE_SEGMENTS; i++) {
+                float intensity = vertexIntensity(matrix, viewNormals[i], circle[i][0] * r, y, circle[i][1] * r, t);
+                ringColors[section][i] = withIntensity(baseColor, intensity * intensityScale);
             }
         }
 
-    }
+        for (int section = 0; section < CONE_SECTIONS; section++) {
+            float t0 = (float) section / CONE_SECTIONS;
+            float t1 = (float) (section + 1) / CONE_SECTIONS;
 
-    private void drawCone(VertexConsumer consumer, Matrix4f matrix,
-                          float length, float endRadius, int apexColor, int segments, boolean flipNormal) {
+            float y0 = beamLength * t0;
+            float y1 = beamLength * t1;
+            float r0 = radius * t0;
+            float r1 = radius * t1;
 
-        int fadeColor = apexColor & 0x00FFFFFF;
+            for (int i = 0; i < CIRCLE_SEGMENTS; i++) {
+                int nextI = (i + 1) % CIRCLE_SEGMENTS;
 
-        for (int i = 0; i < segments; i++) {
-            float angle1 = (float) (2 * Math.PI * i / segments);
-            float angle2 = (float) (2 * Math.PI * (i + 1) / segments);
-            
-            float x1 = (float) (endRadius * Math.cos(angle1));
-            float z1 = (float) (endRadius * Math.sin(angle1));
-            float x2 = (float) (endRadius * Math.cos(angle2));
-            float z2 = (float) (endRadius * Math.sin(angle2));
-            if(flipNormal){
-                addVertex(consumer, matrix, 0,0,0, apexColor);
-                addVertex(consumer, matrix, x2, length, z2, fadeColor);
-                addVertex(consumer, matrix, x1, length, z1, fadeColor);
-            }else {
-                addVertex(consumer, matrix, 0,0,0, apexColor);
-                addVertex(consumer, matrix, x1, length, z1, fadeColor);
-                addVertex(consumer, matrix, x2, length, z2, fadeColor);
+                float xi0 = circle[i][0] * r0, zi0 = circle[i][1] * r0;
+                float xj0 = circle[nextI][0] * r0, zj0 = circle[nextI][1] * r0;
+                float xi1 = circle[i][0] * r1, zi1 = circle[i][1] * r1;
+                float xj1 = circle[nextI][0] * r1, zj1 = circle[nextI][1] * r1;
+
+                int ci0 = ringColors[section][i];
+                int cj0 = ringColors[section][nextI];
+                int ci1 = ringColors[section + 1][i];
+                int cj1 = ringColors[section + 1][nextI];
+
+                addVertex(consumer, matrix, xi0, y0, zi0, ci0);
+                addVertex(consumer, matrix, xi1, y1, zi1, ci1);
+                addVertex(consumer, matrix, xj0, y0, zj0, cj0);
+
+                addVertex(consumer, matrix, xi1, y1, zi1, ci1);
+                addVertex(consumer, matrix, xj1, y1, zj1, cj1);
+                addVertex(consumer, matrix, xj0, y0, zj0, cj0);
             }
-
         }
-            
-        drawEndCap(consumer, matrix, length, endRadius, fadeColor, segments);
-        }
-        
-    private static int scaleAlpha(int argb, float factor) {
-        int a = (int) (((argb >>> 24) & 0xFF) * factor);
-        int r = ((argb >>> 16) & 0xFF);
-        int g = ((argb >>>  8) & 0xFF);
-        int b = ( argb         & 0xFF);
-        return (a << 24) | (r << 16) | (g << 8) | b;
     }
 
-    private void addVertex(VertexConsumer consumer, Matrix4f matrix, 
+    private float vertexIntensity(Matrix4f matrix, Vector3f viewNormal, float x, float y, float z, float t) {
+        Vector3f viewPos = new Vector3f(x, y, z).mulPosition(matrix);
+        float distance = viewPos.length();
+        if (distance < 1.0e-4f) {
+            return 0.0f;
+        }
+        Vector3f toCam = viewPos.mul(-1.0f / distance);
+
+        float facing = Math.abs(viewNormal.dot(toCam));
+        float core = facing * facing;
+
+        float lengthFade = calculateAlphaAtDistance(t);
+        float heightFade = 1.0f - t * 0.7f;
+
+        return core * lengthFade * heightFade;
+    }
+
+
+    private float calculateAlphaAtDistance(float t) {
+        if (t < 0.1f) {
+            return t * 10.0f;
+        } else if (t < 0.8f) {
+            return 1.0f;
+        } else {
+            return 1.0f - (t - 0.8f) * 5.0f;
+        }
+    }
+
+
+    private static int withIntensity(int argb, float intensity) {
+        int a = Mth.clamp((int) (((argb >>> 24) & 0xFF) * intensity), 0, 255);
+        return (a << 24) | (argb & 0x00FFFFFF);
+    }
+
+    private void addVertex(VertexConsumer consumer, Matrix4f matrix,
                            float x, float y, float z, int color) {
         consumer.addVertex(matrix, x, y, z)
-               .setColor(color);
-    }
-
-    private void drawEndCap(VertexConsumer consumer, Matrix4f matrix, 
-                            float length, float radius, int color, int segments) {
-        for (int i = 0; i < segments; i++) {
-            float angle1 = (float) (2 * Math.PI * i / segments);
-            float angle2 = (float) (2 * Math.PI * (i + 1) / segments);
-            
-            float x1 = (float) (radius * Math.cos(angle1));
-            float z1 = (float) (radius * Math.sin(angle1));
-            float x2 = (float) (radius * Math.cos(angle2));
-            float z2 = (float) (radius * Math.sin(angle2));
-            
-            addVertex(consumer, matrix, 0, length, 0, color);
-            addVertex(consumer, matrix, x1, length, z1, color);
-            addVertex(consumer, matrix, x2, length, z2, color);
-        }
+                .setColor(color);
     }
 
     private void applyFacingRotation(PoseStack poseStack, Direction facing) {
